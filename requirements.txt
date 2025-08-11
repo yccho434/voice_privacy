@@ -1,0 +1,16 @@
+# 기본 패키지
+streamlit==1.48.0
+python-dotenv==1.0.1
+urllib3==2.2.1
+
+# 음성 처리
+pydub==0.25.1
+audioop-lts==0.2.2  # Python 3.13 호환
+
+# FFmpeg 자동 설치!
+imageio-ffmpeg==0.5.1  # FFmpeg 바이너리 포함
+
+# PII 탐지용 (privacy-pii 프로젝트)
+regex==2025.7.34
+pandas==2.3.1
+numpy==2.3.2

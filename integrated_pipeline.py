@@ -7,19 +7,24 @@
 import os
 import json
 import tempfile
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
+
+# privacy-pii 경로 추가
+PRIVACY_PII_PATH = Path(__file__).parent / "privacy-pii" / "app"
+sys.path.insert(0, str(PRIVACY_PII_PATH))
 
 # 각 단계 모듈 임포트
 from audio_enhancer import AudioEnhancer
 from speech_to_text import ETRISpeechToText
 from conservative_corrector import ConservativeCorrector, InteractiveReviewer
 from etri_ner_detector import EnhancedPIIDetector
-from privacy_pii.app.detectors.regex_patterns import detect_by_regex
-from privacy_pii.app.detectors.keyword_rules import detect_by_keywords
-from pii_masker import PIIMasker
+from detectors.regex_patterns import detect_by_regex
+from detectors.keyword_rules import detect_by_keywords
+from pii_masker import PIIMasker, MaskingResult
 
 
 @dataclass
@@ -208,6 +213,26 @@ class IntegratedPipeline:
                     result.corrected_text,
                     use_spoken=True  # 구어체 모드
                 )
+                # entities를 딕셔너리 리스트로 변환
+                entities_list = []
+                for entity in entities:
+                    if hasattr(entity, '__dict__'):
+                        entities_list.append(entity.__dict__)
+                    elif isinstance(entity, dict):
+                        entities_list.append(entity)
+                    else:
+                        # PIIEntity 객체를 딕셔너리로 변환
+                        entities_list.append({
+                            "text": entity.text,
+                            "label": entity.label,
+                            "subtype": entity.subtype,
+                            "start": entity.start,
+                            "end": entity.end,
+                            "score": entity.score,
+                            "source": entity.source,
+                            "label_adjusted": entity.label
+                        })
+                entities = entities_list
             else:
                 # 정규식 + 키워드만 사용
                 regex_hits = detect_by_regex(result.corrected_text)
@@ -243,18 +268,30 @@ class IntegratedPipeline:
                     "default": "[개인정보]"
                 }
             
+            # 마스킹 실행
             masking_result = self.masker.mask(
                 result.corrected_text,
-                entities,
+                entities,  # 이미 딕셔너리 리스트로 변환됨
                 masking_rules
             )
             
-            result.masking = {
-                "masked_text": masking_result.masked_text,
-                "total_masked": masking_result.stats["total"],
-                "mapping_file": masking_result.mapping_file
-            }
-            result.masked_text = masking_result.masked_text
+            # MaskingResult 객체 처리
+            if isinstance(masking_result, MaskingResult):
+                result.masking = {
+                    "masked_text": masking_result.masked_text,
+                    "total_masked": masking_result.stats.get("total", 0),
+                    "mapping_file": masking_result.mapping_file
+                }
+                result.masked_text = masking_result.masked_text
+            else:
+                # 예외 처리
+                result.masking = {
+                    "masked_text": result.corrected_text,
+                    "total_masked": 0,
+                    "mapping_file": None
+                }
+                result.masked_text = result.corrected_text
+            
             result.processing_time["masking"] = time.time() - start_time
             
             # 중간 결과 저장
@@ -267,6 +304,8 @@ class IntegratedPipeline:
         except Exception as e:
             result.errors.append(str(e))
             print(f"❌ 파이프라인 오류: {e}")
+            import traceback
+            traceback.print_exc()
         
         return result
     

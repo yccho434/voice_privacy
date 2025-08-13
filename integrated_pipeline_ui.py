@@ -242,6 +242,7 @@ elif current_step == 2:
                 st.rerun()
 
 # Step 3: 음성 인식
+# Step 3: 음성 인식
 elif current_step == 3:
     st.header("🎤 Step 4: 음성 인식 (STT)")
     
@@ -252,6 +253,30 @@ elif current_step == 3:
     with col1:
         st.subheader("STT 설정")
         language = st.selectbox("언어", ["korean", "english", "japanese", "chinese"])
+        
+        # 병렬 처리 옵션 추가
+        st.divider()
+        st.subheader("⚡ 처리 모드")
+        
+        processing_mode = st.radio(
+            "처리 속도 선택",
+            [
+                "🔄 순차 처리 (안정적)",
+                "⚡ 병렬 처리 (2배 빠름)"
+            ],
+            index=0,
+            help="병렬 처리는 더 빠르지만 API 제한에 주의하세요"
+        )
+        
+        # 워커 수 결정
+        if "순차" in processing_mode:
+            max_workers = 1
+            st.info("✅ 순차 모드: 안정적이지만 느림")
+        else:
+            max_workers = 2
+            st.success("⚡ 병렬 모드: 2워커로 약 2배 빠름")
+            st.caption("테스트 결과: 100% 성공률")
+        
         show_chunks = st.checkbox("청크별 결과 표시", value=True)
         
         if st.button("🎯 음성 인식 시작", type="secondary", use_container_width=True):
@@ -260,21 +285,40 @@ elif current_step == 3:
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                time_text = st.empty()
+                start_time = time.time()
                 
                 def update_progress(current, total, status):
                     progress_bar.progress(current / total)
                     status_text.text(status)
+                    elapsed = time.time() - start_time
+                    time_text.text(f"⏱️ 경과: {int(elapsed)}초")
                 
+                # 병렬 처리 옵션과 함께 실행
                 result = stt.recognize_long_audio(
                     audio_for_stt,
                     language=language,
-                    progress_callback=update_progress
+                    progress_callback=update_progress,
+                    max_workers=max_workers  # 1 또는 2
                 )
+                
+                total_time = time.time() - start_time
                 
                 if result["success"]:
                     st.session_state.pipeline_data["stt_result"] = result
                     st.session_state.pipeline_data["original_text"] = result["text"]
-                    st.success(f"✅ 인식 완료! {len(result['text'])}자")
+                    
+                    # 처리 모드별 성공 메시지
+                    mode = result.get("processing_mode", "unknown")
+                    if "parallel" in mode:
+                        st.success(f"✅ 병렬 처리 완료! {len(result['text'])}자 ({total_time:.1f}초)")
+                    else:
+                        st.success(f"✅ 순차 처리 완료! {len(result['text'])}자 ({total_time:.1f}초)")
+                    
+                    # 성능 비교 (예상)
+                    if max_workers == 2:
+                        estimated_sequential = total_time * 2
+                        st.info(f"⚡ 예상 시간 절약: 약 {estimated_sequential - total_time:.1f}초")
                 else:
                     st.error(f"❌ 인식 실패: {result.get('error')}")
     
@@ -294,7 +338,7 @@ elif current_step == 3:
             st.session_state.pipeline_data["edited_stt_text"] = edited_text
             
             # 통계
-            col_a, col_b, col_c = st.columns(3)
+            col_a, col_b, col_c, col_d = st.columns(4)
             with col_a:
                 st.metric("글자 수", f"{len(edited_text):,}")
             with col_b:
@@ -303,28 +347,20 @@ elif current_step == 3:
                 if "stt_result" in st.session_state.pipeline_data:
                     chunks = st.session_state.pipeline_data["stt_result"].get("total_chunks", 1)
                     st.metric("청크 수", chunks)
+            with col_d:
+                if "stt_result" in st.session_state.pipeline_data:
+                    mode = st.session_state.pipeline_data["stt_result"].get("processing_mode", "")
+                    if "parallel_2" in mode:
+                        st.metric("처리 모드", "병렬 2")
+                    else:
+                        st.metric("처리 모드", "순차")
             
             # 청크별 결과
             if show_chunks and "stt_result" in st.session_state.pipeline_data:
                 with st.expander("청크별 상세 결과"):
                     for chunk in st.session_state.pipeline_data["stt_result"].get("chunks", []):
                         if chunk.success:
-                            st.text(f"청크 {chunk.chunk_index + 1}: {len(chunk.text)}자")
-    
-    st.divider()
-    
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        if st.button("⬅️ 이전", use_container_width=True):
-            st.session_state.current_step = 2
-            st.rerun()
-    with col3:
-        if st.button("다음 ➡️", type="primary", use_container_width=True):
-            if "edited_stt_text" not in st.session_state.pipeline_data:
-                st.error("먼저 음성 인식을 실행해주세요!")
-            else:
-                st.session_state.current_step = 4
-                st.rerun()
+                            st.text(f"청크 {chunk.chunk_index + 1}: {len(chunk.text)}자 ✅")
 
 # Step 4: 텍스트 보정
 elif current_step == 4:

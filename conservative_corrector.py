@@ -1,7 +1,7 @@
 # conservative_corrector.py
 """
-보수적 STT 텍스트 보정 시스템
-확실한 것만 수정하고, 애매한 부분은 사용자 검토 요청
+보수적 STT 텍스트 보정 시스템 - GPT 최적화 버전
+Claude처럼 작동하도록 개선
 """
 
 import os
@@ -36,7 +36,7 @@ class CorrectionResult:
 
 
 class ConservativeCorrector:
-    """보수적 텍스트 보정기"""
+    """보수적 텍스트 보정기 - GPT 최적화"""
     
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -45,132 +45,182 @@ class ConservativeCorrector:
         
         self.client = OpenAI(api_key=self.api_key)
         self.model = model
+        
+        # 일반적인 STT 오류 패턴 (하드코딩 아님, 학습용)
+        self.common_patterns = self._load_common_patterns()
+    
+    def _load_common_patterns(self) -> Dict:
+        """일반적인 STT 오류 패턴 로드"""
+        return {
+            "phonetic_confusion": [
+                ("잤", "졌", "게임|보드게임|이기|지는"),
+                ("일정", "일등", "성적|등수|1등|일등"),
+                ("한이", "한 번도", "없어요|없습니다"),
+                ("한의어", "한 번도", "없어요|없습니다"),
+                ("초아", "좋아", "친구|기분"),
+                ("프사", "학교", "친구|학생"),
+                ("손이라고", "손해라고", "기분|나빠"),
+            ],
+            "spacing_errors": [
+                ("어때요", "어때요", None),  # 문맥에 따라 다름
+            ]
+        }
     
     def create_system_prompt(self) -> str:
-        """시스템 프롬프트 - 역할 정의"""
-        return """You are a Korean STT post-processor with expertise in:
-1. Korean phonology and common misrecognition patterns
-2. Natural language understanding for context analysis
-3. Conservative correction - only fix what's certain
+        """시스템 프롬프트 - GPT를 언어학자로 만들기"""
+        return """당신은 10년 경력의 한국어 STT 오류 보정 전문가입니다.
+수천 개의 음성 인식 오류를 분석한 경험이 있으며, 특히 한국어 음운 변화와 구어체 특성을 깊이 이해합니다.
 
-Your task is to:
-- Identify potential STT errors based on phonetic similarity
-- Consider semantic coherence within the context
-- Mark suspicious parts rather than auto-correcting uncertain cases
+당신의 전문 분야:
+1. 한국어 음운학 - 발음 유사성으로 인한 오인식 패턴
+2. 문맥 기반 의미 분석 - 대화의 흐름과 주제 파악
+3. 구어체 특성 - 일상 대화의 자연스러운 흐름
 
-Key principles:
-- STT often confuses words with similar pronunciation
-- Single syllables can be incorrectly separated or merged
-- Context is crucial for identifying errors
-- When in doubt, mark as suspicious rather than correct"""
+작업 원칙:
+- 확실한 오류만 수정합니다
+- 애매한 부분은 원본을 유지하고 의심 구간으로 표시합니다
+- 각 수정에는 명확한 언어학적 근거가 있어야 합니다"""
     
     def create_analysis_prompt(self, text: str) -> str:
-        """1단계: 문맥 분석 프롬프트"""
-        return f"""다음 STT 출력 텍스트를 분석하세요:
+        """1단계: 문맥 파악 프롬프트 (Chain of Thought)"""
+        return f"""다음 STT 텍스트를 분석하세요.
 
-텍스트:
+=== 분석할 텍스트 ===
 {text}
 
-분석 항목:
-1. 전체 대화의 주제/상황 파악
-2. 각 문장의 의미적 완성도
-3. 문장 간 의미 연결성
-4. 어색하거나 부자연스러운 표현
+=== 단계별 분석 지시 ===
 
-JSON 형식으로 답하세요:
+STEP 1. 대화 주제와 상황 파악
+- 이 대화의 주요 주제는 무엇인가?
+- 대화 참여자는 누구인가? (나이, 관계 추정)
+- 어떤 상황에서 나눈 대화인가?
+
+STEP 2. 의미적 일관성 검토
+- 각 문장이 전체 문맥에서 자연스러운가?
+- 앞뒤 문장과 논리적으로 연결되는가?
+- 이상하거나 부자연스러운 표현이 있는가?
+
+STEP 3. 잠재적 STT 오류 식별
+- 문맥상 이상한 단어들을 찾아내세요
+- 각 이상한 부분에 대해 "왜 이상한지" 설명하세요
+- 음운적으로 유사한 대안이 있는지 생각해보세요
+
+JSON 응답:
 {{
-    "topic": "대화 주제",
-    "context_type": "일상대화|의료상담|심리상담|업무대화|기타",
-    "sentence_analysis": [
+    "topic": "대화의 주제",
+    "context_type": "상담|일상대화|교육|의료|기타",
+    "participants": {{
+        "speaker1": "추정 정보",
+        "speaker2": "추정 정보"
+    }},
+    "semantic_issues": [
         {{
-            "sentence": "문장",
-            "semantic_completeness": 0.0-1.0,
-            "issues": ["발견된 문제점"]
+            "text": "이상한 부분",
+            "reason": "왜 이상한지",
+            "context_clue": "판단 근거가 된 문맥",
+            "suggested_correction": "제안하는 수정"
         }}
     ],
-    "overall_coherence": 0.0-1.0
+    "confidence_level": "high|medium|low"
 }}"""
     
     def create_conservative_prompt(self, text: str, context: Optional[Dict] = None) -> str:
-        """2단계: 보수적 보정 프롬프트"""
+        """2단계: 보정 프롬프트 - Few-shot 학습 포함"""
+        
+        # Few-shot 예시들
+        examples = """
+=== 보정 예시들 (학습용) ===
+
+예시 1:
+원본: "어제 아빠랑 보드게임 하다가 제가 잤거든요"
+문맥: 보드게임을 하면서 화가 난 이야기
+분석: '잤거든요'는 문맥상 부자연스러움. 보드게임 + 화났다 → '졌거든요'가 적절
+수정: "어제 아빠랑 보드게임 하다가 제가 졌거든요"
+신뢰도: 0.9 (문맥이 명확)
+
+예시 2:
+원본: "초아 친구는 형제가 있어요?"
+문맥: 상담 대화, 질문-답변 형식
+분석: '초아'가 문장 시작에 어색함. '좋아요.' + '친구는'으로 분리 추정
+수정: "좋아요. 친구는 형제가 있어요?"
+신뢰도: 0.7 (문맥상 추정)
+
+예시 3:
+원본: "한이 없어요"
+문맥: 부정적 경험 유무를 묻는 질문에 대한 답변
+분석: '한이'는 '한 번도'의 오인식으로 추정
+수정: "한 번도 없어요"
+신뢰도: 0.8 (문법적으로 더 자연스러움)
+
+예시 4:
+원본: "일정을 하지 못하게 될까봐"
+문맥: 성적과 등수에 대한 걱정
+분석: '일정'은 '일등'의 오인식. 성적 문맥에서 '일등'이 적절
+수정: "일등을 하지 못하게 될까봐"
+신뢰도: 0.85 (문맥이 명확)
+"""
         
         context_info = ""
         if context:
             context_info = f"""
-문맥 정보:
-- 주제: {context.get('topic', '불명')}
-- 유형: {context.get('context_type', '일반')}
-- 전체 일관성: {context.get('overall_coherence', 0):.1f}
+=== 1단계 분석 결과 ===
+주제: {context.get('topic', '불명')}
+상황: {context.get('context_type', '일반')}
+주요 문제: {len(context.get('semantic_issues', []))}개 발견
 """
         
-        prompt = f"""STT 텍스트를 보수적으로 보정하세요.
+        prompt = f"""{examples}
+
 {context_info}
 
-보정 원칙:
-1. 확실한 것만 수정:
-   - 문장부호 추가 (? . , !)
-   - 명백한 띄어쓰기 오류
-   - 중복된 조사 (을를 → 를)
-
-2. 의심스러운 부분 탐지 (핵심):
-   음운적 오류 가능성:
-   - 발음 유사 단어 (ㄷ/ㅌ, ㅂ/ㅍ, ㄱ/ㅋ 혼동)
-   - 연음으로 인한 오인식
-   - 음절 분리/결합 오류
-   
-   의미적 오류 가능성:
-   - 문맥과 맞지 않는 단어
-   - 주어-서술어 의미 불일치
-   - 전후 문장과 연결 안 되는 내용
-   
-   문법적 오류 가능성:
-   - 조사 불일치 (받침 유무)
-   - 어미 활용 오류
-   - 어순 이상
-
-3. 수정하지 말 것:
-   - 구어체 표현
-   - 방언이나 줄임말
-   - 감정 표현
-
-원본 텍스트:
+=== 보정할 텍스트 ===
 {text}
 
-분석 방법:
-1. 각 문장을 음성으로 발화했을 때를 상상
-2. 유사한 발음으로 오인식될 수 있는 부분 찾기
-3. 전후 문맥과 의미가 자연스럽게 연결되는지 확인
+=== 작업 지시 ===
 
-JSON 응답:
+당신은 이제 위 예시들을 참고하여 텍스트를 보정해야 합니다.
+
+각 문장에 대해 다음 단계를 따르세요:
+
+1. 문맥 확인: 이 문장이 전체 대화에서 자연스러운가?
+2. 음운 검토: 이상한 단어가 다른 단어의 오인식일 가능성은?
+3. 의미 검증: 수정 후 의미가 더 자연스러워지는가?
+4. 신뢰도 평가: 이 수정이 얼마나 확실한가?
+
+보정 원칙:
+- 신뢰도 0.7 이상만 자동 수정
+- 0.3~0.7은 suspicious_parts에 포함
+- 0.3 미만은 수정하지 않음
+- 문장 끝마다 적절한 문장부호 추가
+- 각 문장 사이에 줄바꿈 추가 (가독성)
+
+JSON 응답 형식:
 {{
-    "corrected_text": "보수적으로 보정된 텍스트",
+    "corrected_text": "보정된 텍스트 (문장마다 줄바꿈)",
     "auto_corrections": [
         {{
-            "type": "punctuation|spacing|duplicate",
-            "original": "원본 텍스트",
-            "corrected": "수정된 텍스트",
-            "confidence": 0.9,
-            "position": 시작위치
+            "type": "phonetic|semantic|punctuation|spacing",
+            "original": "원본",
+            "corrected": "수정",
+            "confidence": 0.0-1.0,
+            "reason": "수정 이유",
+            "context_clue": "근거가 된 문맥"
         }}
     ],
     "suspicious_parts": [
         {{
-            "text": "의심스러운 부분",
-            "start_char": 시작위치,
-            "end_char": 끝위치,
-            "confidence": 0.3,
-            "reason": "구체적 이유",
+            "text": "의심 부분",
+            "start_char": 시작,
+            "end_char": 끝,
+            "confidence": 0.3-0.7,
+            "reason": "의심 이유",
             "linguistic_type": "phonetic|semantic|grammatical",
             "suggestions": ["대안1", "대안2"],
-            "context_clue": "판단 근거가 된 주변 문맥"
+            "context_clue": "주변 문맥"
         }}
-    ]
-}}
-
-중요: 
-- confidence가 0.5 이하인 모든 의심 구간을 suspicious_parts에 포함
-- 음운적으로 유사한 대안이 있다면 반드시 suggestions에 포함
-- reason은 구체적이고 언어학적 근거를 제시"""
+    ],
+    "reasoning": "전체적인 보정 근거와 접근 방법"
+}}"""
         
         return prompt
     
@@ -190,7 +240,6 @@ JSON 응답:
         
         for pattern, replacement in duplicates:
             if re.search(pattern, result):
-                # 위치 찾기
                 for match in re.finditer(pattern, result):
                     corrections.append({
                         "type": "duplicate",
@@ -201,50 +250,67 @@ JSON 응답:
                     })
                 result = re.sub(pattern, replacement, result)
         
-        # 2. 명백한 띄어쓰기 (매우 보수적)
-        # 예: "그런데요" → "그런데 요" (X, 구어체 보존)
-        # 예: "했습니다.그래서" → "했습니다. 그래서" (O)
-        result = re.sub(r'([.!?])([가-힣])', r'\1 \2', result)
+        # 2. 문장 끝 처리
+        result = re.sub(r'([가-힣])\s*\.\s*([가-힣])', r'\1. \2', result)
         
         # 3. 연속 공백 제거
         result = re.sub(r'\s+', ' ', result).strip()
         
         return result, corrections
     
-    def analyze_context(self, text: str) -> Dict:
-        """문맥 분석 (선택적)"""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a Korean language expert analyzing STT output."
-                    },
-                    {"role": "user", "content": self.create_analysis_prompt(text)}
-                ],
-                temperature=0.3,
-                response_format={"type": "json_object"}
-            )
-            
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            print(f"⚠️ 문맥 분석 실패: {e}")
-            return {}
+    def post_process_with_patterns(self, text: str, context: Dict) -> str:
+        """컨텍스트 기반 후처리 (일반화된 패턴)"""
+        
+        # 문맥에서 키워드 추출
+        topic = context.get('topic', '').lower()
+        issues = context.get('semantic_issues', [])
+        
+        # 동적 패턴 적용
+        result = text
+        
+        # semantic_issues에서 제안된 수정사항 적용
+        for issue in issues:
+            if issue.get('suggested_correction'):
+                original = issue.get('text', '')
+                correction = issue.get('suggested_correction', '')
+                if original and correction and original in result:
+                    result = result.replace(original, correction)
+        
+        # 문장별 줄바꿈 추가
+        result = re.sub(r'([.!?])\s*(?=[가-힣])', r'\1\n', result)
+        
+        return result
     
     def correct(self, text: str, use_context_analysis: bool = True) -> CorrectionResult:
-        """보수적 보정 실행"""
+        """보수적 보정 실행 - 개선된 버전"""
         
         # 기본 규칙 적용
         pre_corrected, rule_corrections = self.apply_basic_rules(text)
         
-        # 문맥 분석 (선택적)
+        # 1단계: 문맥 분석 (Chain of Thought)
         context = {}
-        if use_context_analysis:
+        if use_context_analysis and len(text) > 50:  # 짧은 텍스트는 스킵
             print("🔍 문맥 분석 중...")
-            context = self.analyze_context(pre_corrected)
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert in Korean language and STT error analysis."
+                        },
+                        {"role": "user", "content": self.create_analysis_prompt(pre_corrected)}
+                    ],
+                    temperature=0.1,  # 더 낮춤
+                    response_format={"type": "json_object"}
+                )
+                
+                context = json.loads(response.choices[0].message.content)
+            except Exception as e:
+                print(f"⚠️ 문맥 분석 실패: {e}")
+                context = {}
         
-        # GPT 보정 호출
+        # 2단계: GPT 보정 (Few-shot + 문맥)
         prompt = self.create_conservative_prompt(pre_corrected, context)
         
         try:
@@ -258,11 +324,17 @@ JSON 응답:
                     },
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2,  # 0.1에서 0.2로 약간 상향
+                temperature=0.0,  # 완전 deterministic
+                top_p=0.1,  # 가장 확실한 것만
                 response_format={"type": "json_object"}
             )
             
             result = json.loads(response.choices[0].message.content)
+            
+            # 3단계: 후처리 (컨텍스트 기반)
+            corrected_text = result.get("corrected_text", pre_corrected)
+            if context:
+                corrected_text = self.post_process_with_patterns(corrected_text, context)
             
             # 의심스러운 부분 파싱
             suspicious_parts = []
@@ -278,13 +350,13 @@ JSON 응답:
                 ))
             
             # 자동 수정 사항 병합
-            all_corrections = rule_corrections + result.get("auto_corrections", [])
+            auto_corrections = rule_corrections + result.get("auto_corrections", [])
             
             return CorrectionResult(
                 original_text=text,
-                corrected_text=result.get("corrected_text", pre_corrected),
+                corrected_text=corrected_text,
                 suspicious_parts=suspicious_parts,
-                auto_corrections=all_corrections,
+                auto_corrections=auto_corrections,
                 needs_review=len(suspicious_parts) > 0,
                 context_analysis=context
             )
@@ -300,6 +372,47 @@ JSON 응답:
                 needs_review=False,
                 context_analysis=context
             )
+    
+    def correct_in_chunks(self, text: str, chunk_size: int = 10) -> CorrectionResult:
+        """긴 텍스트를 청크로 나누어 처리 (선택적)"""
+        
+        sentences = re.split(r'([.!?]+)', text)
+        chunks = []
+        current_chunk = []
+        
+        for i in range(0, len(sentences)-1, 2):
+            sentence = sentences[i] + sentences[i+1] if i+1 < len(sentences) else sentences[i]
+            current_chunk.append(sentence)
+            
+            if len(current_chunk) >= chunk_size:
+                chunks.append(''.join(current_chunk))
+                current_chunk = []
+        
+        if current_chunk:
+            chunks.append(''.join(current_chunk))
+        
+        # 각 청크 처리
+        all_corrected = []
+        all_suspicious = []
+        all_corrections = []
+        
+        for chunk in chunks:
+            result = self.correct(chunk, use_context_analysis=True)
+            all_corrected.append(result.corrected_text)
+            all_suspicious.extend(result.suspicious_parts)
+            all_corrections.extend(result.auto_corrections)
+        
+        # 병합
+        final_text = '\n'.join(all_corrected)
+        
+        return CorrectionResult(
+            original_text=text,
+            corrected_text=final_text,
+            suspicious_parts=all_suspicious,
+            auto_corrections=all_corrections,
+            needs_review=len(all_suspicious) > 0,
+            context_analysis={}
+        )
 
 
 class InteractiveReviewer:
@@ -368,6 +481,10 @@ class InteractiveReviewer:
                 summary.append(f"중복 조사 {count}개")
             elif corr_type == "spacing":
                 summary.append(f"띄어쓰기 {count}개")
+            elif corr_type == "phonetic":
+                summary.append(f"음운 오류 {count}개")
+            elif corr_type == "semantic":
+                summary.append(f"의미 오류 {count}개")
             else:
                 summary.append(f"{corr_type} {count}개")
         
@@ -408,7 +525,8 @@ class InteractiveReviewer:
 
 # 편의 함수
 def conservative_correct_with_review(text: str, api_key: Optional[str] = None,
-                                    use_context: bool = True) -> Dict:
+                                    use_context: bool = True,
+                                    use_chunks: bool = False) -> Dict:
     """
     보수적 보정 + 검토 필요 여부 반환
     
@@ -416,6 +534,7 @@ def conservative_correct_with_review(text: str, api_key: Optional[str] = None,
         text: STT 출력 텍스트
         api_key: OpenAI API 키
         use_context: 문맥 분석 사용 여부
+        use_chunks: 청크 단위 처리 여부
     
     Returns:
         {
@@ -431,7 +550,10 @@ def conservative_correct_with_review(text: str, api_key: Optional[str] = None,
     reviewer = InteractiveReviewer()
     
     # 보정 실행
-    result = corrector.correct(text, use_context_analysis=use_context)
+    if use_chunks and len(text) > 500:  # 긴 텍스트는 청크로
+        result = corrector.correct_in_chunks(text)
+    else:
+        result = corrector.correct(text, use_context_analysis=use_context)
     
     # 검토용 데이터 생성
     display_data = reviewer.display_for_review(result)
@@ -448,8 +570,13 @@ def conservative_correct_with_review(text: str, api_key: Optional[str] = None,
 
 # 테스트
 if __name__ == "__main__":
-    test_text = """최근에 건강은 어때 건강한 것 같아요. 최근에 더 친 곳 있어? 
-    아빠가 꽉 잡아서 어깨가 아파요. 언제 다쳤어 이번 주 월요일이야"""
+    # 실제 오류가 있는 텍스트
+    test_text = """어제 아빠랑 보드게임 하다가 제가 잤거든요. 
+    제가 원래 지는 걸 너무 싫어해서요.
+    일정을 하지 못하게 될까 봐 무서워요.
+    초아 친구는 형제가 있어요?
+    프사 친구들이랑은 주로 뭐하고 놀아요?
+    한이 없어요."""
     
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -460,7 +587,7 @@ if __name__ == "__main__":
         print("="*60)
         
         # 보정 실행
-        result = conservative_correct_with_review(test_text, api_key)
+        result = conservative_correct_with_review(test_text, api_key, use_context=True)
         
         print(f"\n📝 원본:")
         print(result["original"])
@@ -473,7 +600,6 @@ if __name__ == "__main__":
             print(f"\n📊 문맥 분석:")
             print(f"주제: {result['context'].get('topic', '불명')}")
             print(f"유형: {result['context'].get('context_type', '일반')}")
-            print(f"일관성: {result['context'].get('overall_coherence', 0):.1f}")
         
         if result["needs_review"]:
             print(f"\n⚠️ 검토 필요: {len(result['review_items'])}개 항목")

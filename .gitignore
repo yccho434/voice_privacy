@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+# Hugging Face 모델 캐시 폴더
+.hf_cache/
+
+# 학습 결과물 폴더
+outputs/
+
+# 개별 대용량 파일 확장자
+*.safetensors
+*.bin
+*.pt

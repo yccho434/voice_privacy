@@ -5,9 +5,7 @@ import re
 from collections import Counter
 from typing import List, Dict, Tuple, Optional
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 문맥 키워드: 모호한 '번호' 라벨을 전화/계좌/우편번호/IP/여권/면허 등으로 분류
-# ──────────────────────────────────────────────────────────────────────────────
+# ---- 기존 번호 세분화 키워드 ----
 KEYWORDS: Dict[str, List[str]] = {
     "전화번호": ["전화", "휴대폰", "핸드폰", "연락처", "콜", "통화", "대표번호", "번호로", "문자"],
     "계좌번호": ["계좌", "입금", "송금", "이체", "은행", "우리은행", "국민", "신한", "하나", "농협", "기업", "수취", "예금주"],
@@ -17,18 +15,21 @@ KEYWORDS: Dict[str, List[str]] = {
     "IP": ["IP", "아이피", "서버", "내부망", "사설IP", "공인IP", "내부", "외부망"],
 }
 
-NEAR = 24  # 문맥 반경(문자 수)
+# ---- 상담 도메인 라벨 키워드 (추가 스팬용) ----
+DOMAIN_KEYWORDS = {
+    "정신건강": ["우울","불안","공황","ADHD","PTSD","양극성","조현","진단","약물","복용","트라우마","외상"],
+    "상담이력": ["상담","세션","회기","내담자","초진","재진","기록","케이스노트"],
+    "생활패턴": ["수면","불면","과수면","악몽","음주","흡연","운동","식습관","게임중독"],
+    "사건경험": ["학대","폭력","따돌림","사고","상해","성폭력","자살","시도","가정폭력","중독"],
+}
 
-# 간단 휴리스틱 패턴 (정규식으로 힌트)
+NEAR = 24
+
 RE_PHONE = re.compile(r"(?:^|[^0-9])(01[016789])[-.\s]?\d{3,4}[-.\s]?\d{4}(?:$|[^0-9])")
 RE_IP    = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 RE_ZIP   = re.compile(r"\b\d{5}\b")
 
 def _score_context(text: str, s: int, e: int) -> Tuple[Optional[str], float, Optional[str]]:
-    """
-    '번호' 라벨에 대해 주변 문맥으로 세부유형(subtype) 추정.
-    반환: (subtype, score, keyword)
-    """
     left = max(0, s - NEAR)
     right = min(len(text), e + NEAR)
     ctx = text[left:right]
@@ -46,27 +47,33 @@ def _score_context(text: str, s: int, e: int) -> Tuple[Optional[str], float, Opt
     score = min(1.0, 0.6 + 0.1 * hits)
     return subtype, score, hit_kw
 
+def _scan_domain_spans(text: str) -> List[dict]:
+    hits: List[dict] = []
+    for lab, kws in DOMAIN_KEYWORDS.items():
+        for kw in kws:
+            for m in re.finditer(re.escape(kw), text):
+                s, e = m.start(), m.end()
+                hits.append({
+                    "start": s, "end": e, "text": text[s:e],
+                    "label": lab, "label_adjusted": lab, "subtype": None,
+                    "score": 0.6, "source": "keyword-domain"
+                })
+    return hits
+
 def detect_by_keywords(text: str, rx_hits: List[dict]) -> List[dict]:
-    """
-    정규식 결과(rx_hits)를 받아 모호한 라벨을 문맥으로 보정.
-    이미 label_adjusted가 있는 경우는 절대 덮어쓰지 않음.
-    """
     out: List[dict] = []
     for s in rx_hits:
         lab = s.get("label", "")
-        ladj = s.get("label_adjusted")  # 이미 확정된 라벨이면 존중
+        ladj = s.get("label_adjusted")
         st = s["start"]; en = s["end"]
         new = dict(s)
 
-        # 이미 확정 라벨이면 그대로
         if ladj:
             out.append(new)
             continue
 
         if lab == "번호":
             snippet = text[st:en]
-
-            # 1) 휴리스틱 우선
             if RE_PHONE.search(text[max(0, st - 2):min(len(text), en + 2)]):
                 new["subtype"] = "전화번호"
                 new["label_adjusted"] = "번호"
@@ -80,11 +87,9 @@ def detect_by_keywords(text: str, rx_hits: List[dict]) -> List[dict]:
                 new["label_adjusted"] = "번호"
                 new["score"] = max(new.get("score", 0), 0.85)
             else:
-                # 2) 문맥 기반 분류
                 sub, sc, kw = _score_context(text, st, en)
                 if sub:
                     new["subtype"] = sub
-                    # 계좌번호는 금융으로 승격
                     if sub == "계좌번호":
                         new["label_adjusted"] = "금융"
                     else:
@@ -101,4 +106,7 @@ def detect_by_keywords(text: str, rx_hits: List[dict]) -> List[dict]:
             new.setdefault("label_adjusted", lab or "신원")
 
         out.append(new)
+
+    # --- 도메인 키워드 기반 추가 스팬 ---
+    out.extend(_scan_domain_spans(text))
     return out

@@ -1,6 +1,15 @@
 # app/detectors/regex_patterns.py
+from __future__ import annotations
+import os
 import re
 from typing import List, Dict, Tuple
+
+# 검증기(Quick wins)
+from .validators import luhn_ok, rrn_ok, biz_ok, email_domain_allowed
+
+# .env 기반 이메일 도메인 허용/차단(선택)
+ALLOW = set(filter(None, (os.getenv("EMAIL_ALLOW", "").lower().split(","))))
+DENY  = set(filter(None, (os.getenv("EMAIL_DENY", "").lower().split(","))))
 
 # ------------------------------------------------------------
 # 정규식 패턴 (사전 컴파일)
@@ -73,7 +82,6 @@ BANK_WORDS = r"(?:은행|농협|국민|신한|우리|하나|기업|카카오|토
 ACCOUNT_HARD_RE = re.compile(
     r"""
     (?:
-        # 은행명/계좌 키워드가 앞에 있거나 콜론/괄호 동반
         (?:%(BANK)s|계좌|입금|출금)\s*[:\(\)]?\s*
     )?
     (?:
@@ -87,8 +95,6 @@ ACCOUNT_HARD_RE = re.compile(
 ZIP_RE = re.compile(r"(?:\(|\[)?(?P<zip>\d{5})(?:\)|\])?")
 
 # 주소 (도로명/지번 혼합 커버, 괄호 우편번호 허용)
-# - 시/도/군/구 + (읍/면/동/가/리) + (로/길) + 번지/호수
-# - 예: 서울특별시 마포구 성산로 42길 15, 301호 (06236)
 ADDR_RE = re.compile(
     r"""
     (?P<addr>
@@ -112,11 +118,9 @@ ADDR_RE = re.compile(
 DATE_RE = re.compile(r"\b(?:\d{4}[-./]\d{1,2}[-./]\d{1,2})\b")
 TIME_RE = re.compile(r"\b(?:[01]?\d|2[0-3])[:.][0-5]\d\b")
 
-
 # ------------------------------------------------------------
 # 탐지 로직
 # ------------------------------------------------------------
-
 PatternSpec = Tuple[re.Pattern, str, str]  # (pattern, label, subtype)
 
 PATTERNS: List[PatternSpec] = [
@@ -131,7 +135,7 @@ PATTERNS: List[PatternSpec] = [
     (URL_RE, "URL", "URL"),
     (ZIP_RE, "주소", "우편번호"),
     (ADDR_RE, "주소", "주소"),
-    (DATE_RE, "신원", "날짜"),   # 필요시 다른 라벨로 변경 가능
+    (DATE_RE, "신원", "날짜"),
     (TIME_RE, "신원", "시간"),
 ]
 
@@ -139,47 +143,38 @@ def _dedup_and_prune(spans: List[Dict]) -> List[Dict]:
     """겹치는 스팬 정리: 완전 포함되는 짧은 스팬 제거, 동일 범위/텍스트 중복 제거."""
     if not spans:
         return []
-    # 시작-길이 기준 정렬 (길이 긴 것 우선)
     spans.sort(key=lambda s: (s["start"], -(s["end"] - s["start"])))
     pruned: List[Dict] = []
     for s in spans:
         overlap = False
         for p in pruned:
             if s["start"] >= p["start"] and s["end"] <= p["end"]:
-                overlap = True
-                break
+                overlap = True; break
             if s["start"] == p["start"] and s["end"] == p["end"] and s["label"] == p["label"]:
-                overlap = True
-                break
+                overlap = True; break
         if not overlap:
             pruned.append(s)
-    # 최종 정렬
     pruned.sort(key=lambda s: (s["start"], s["end"]))
     return pruned
 
-
 def detect_by_regex(text: str) -> List[Dict]:
-    """정규식 기반 1차 탐지.
+    """정규식 기반 1차 탐지 + 검증기(Quick wins).
     반환: [{label, subtype, text, start, end}]
     """
     hits: List[Dict] = []
-
     for pattern, label, subtype in PATTERNS:
         for m in pattern.finditer(text):
-            # 주소/우편번호는 명명 그룹 고려
             span_text = m.group("addr") if "addr" in pattern.groupindex else m.group(0)
             start = m.start("addr") if "addr" in pattern.groupindex else m.start()
             end = start + len(span_text)
 
-            # URL 패턴이 이메일/IPv4 등을 과포함하는 경우 방어
+            # URL 패턴이 이메일을 과포함하는 경우 방어
             if label == "URL":
-                # 이메일 모양이면 URL로 중복 표기하지 않음
                 if EMAIL_RE.fullmatch(span_text or ""):
                     continue
 
             # 계좌번호: 너무 광범위한 숫자 그룹 오탐 방지(하드 필터)
             if label == "금융" and subtype == "계좌번호":
-                # 최소 2개의 구분자 포함(숫자 3그룹 이상) 또는 직전 15자 이내 은행 키워드
                 raw = span_text
                 sep_cnt = len(re.findall(r"[\s\-]", raw))
                 bank_nearby = False
@@ -189,6 +184,21 @@ def detect_by_regex(text: str) -> List[Dict]:
                     bank_nearby = True
                 if sep_cnt < 2 and not bank_nearby:
                     continue
+
+            # ---------- Quick wins: 검증기 ----------
+            if label == "금융" and subtype == "카드번호":
+                if not luhn_ok(span_text):
+                    continue
+            if label == "신원" and subtype == "주민등록번호":
+                if not rrn_ok(span_text):
+                    continue
+            if label == "번호" and subtype == "사업자등록번호":
+                if not biz_ok(span_text):
+                    continue
+            if label == "계정" and subtype == "이메일":
+                if not email_domain_allowed(span_text, ALLOW or None, DENY or None):
+                    continue
+            # --------------------------------------
 
             hits.append({
                 "label": label,

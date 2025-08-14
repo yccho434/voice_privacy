@@ -534,7 +534,7 @@ elif current_step == 5:
                     col_check, col_text, col_label = st.columns([1, 3, 2])
                     
                     with col_check:
-                        include = st.checkbox("", value=True, key=f"entity_{i}")
+                        include = st.checkbox("선택", value=True, key=f"entity_{i}", label_visibility="hidden")
                     
                     with col_text:
                         st.text(entity["text"])

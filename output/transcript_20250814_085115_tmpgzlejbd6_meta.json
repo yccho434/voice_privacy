@@ -1,0 +1,126 @@
+{
+  "timestamp": "20250814_085115",
+  "original_audio": "C:\\Users\\ksj\\AppData\\Local\\Temp\\tmpgzlejbd6.mp3",
+  "audio_improvement": {
+    "noise_reduction": 21.691244095564432,
+    "clarity": -20.44499440595796,
+    "overall": 21.068119250761196
+  },
+  "stt_stats": {
+    "total_chunks": 4,
+    "success_chunks": 4,
+    "failed_chunks": 0,
+    "retry_count": 0,
+    "total_duration": 0,
+    "success_rate": 1.0,
+    "processing_time": 23.681968688964844
+  },
+  "processing_time": 25.44225573539734,
+  "sentences": [
+    {
+      "text": "최근에 건강은 어때?",
+      "start_time": 0.0,
+      "end_time": 1.915875
+    },
+    {
+      "text": "건강한 것 같아요.",
+      "start_time": 1.915875,
+      "end_time": 3.83175
+    },
+    {
+      "text": "최근에 다친 곳 있어?",
+      "start_time": 3.83175,
+      "end_time": 5.747625
+    },
+    {
+      "text": "아빠가 꽉 잡아서 어깨가 아파요.",
+      "start_time": 5.747625,
+      "end_time": 7.6635
+    },
+    {
+      "text": "언제 다쳤어?",
+      "start_time": 7.6635,
+      "end_time": 9.579375
+    },
+    {
+      "text": "이번 주 월요일이야.",
+      "start_time": 9.579375,
+      "end_time": 11.49525
+    },
+    {
+      "text": "어쩌다 그랬어?",
+      "start_time": 11.49525,
+      "end_time": 13.411125
+    },
+    {
+      "text": "아빠가 저 못 움직이게 하려고 손으로 어깨를 꽉 눌렀어.",
+      "start_time": 13.411125,
+      "end_time": 15.327
+    },
+    {
+      "text": "얼마나 다쳤어?",
+      "start_time": 15.327,
+      "end_time": 18.381
+    },
+    {
+      "text": "근육이 놀라 일주일 정도 움직이지 말고 요즘 뭘 할 때 즐거워?",
+      "start_time": 18.381,
+      "end_time": 21.435000000000002
+    },
+    {
+      "text": "만화책 읽을 때 즐거워요.",
+      "start_time": 21.435000000000002,
+      "end_time": 24.489000000000004
+    },
+    {
+      "text": "어떤 점이 즐거워?",
+      "start_time": 24.489000000000004,
+      "end_time": 27.543000000000006
+    },
+    {
+      "text": "시간도 빨리 갖고 내용이 재미있어서 최근 일주일 동안 짜증이나 화가 난 적",
+      "start_time": 27.543000000000006,
+      "end_time": 30.59700000000001
+    },
+    {
+      "text": "어떤 일 때문에 화가 났어요?",
+      "start_time": 30.597,
+      "end_time": 33.921
+    },
+    {
+      "text": "아빠가 술 마시고 와서 저 때리고 아프게 해서 화가 났을 때 어떻게 하면 풀려?",
+      "start_time": 33.921,
+      "end_time": 37.245
+    },
+    {
+      "text": "기분이 안 풀려요.",
+      "start_time": 37.245,
+      "end_time": 40.568999999999996
+    },
+    {
+      "text": "학교에서도 생각나고 눈물 날 때 잠은 얼마나 자?",
+      "start_time": 40.568999999999996,
+      "end_time": 43.892999999999994
+    },
+    {
+      "text": "12시 정도에 잠 드는 것 같고.",
+      "start_time": 43.892999999999994,
+      "end_time": 47.21699999999999
+    },
+    {
+      "text": "오후 8시에 일어나면 컨디션이 어때?",
+      "start_time": 47.217,
+      "end_time": 49.36366666666667
+    },
+    {
+      "text": "괜찮아요?",
+      "start_time": 49.36366666666667,
+      "end_time": 51.510333333333335
+    },
+    {
+      "text": "잠들기 힘들거나 자다 중간에",
+      "start_time": 51.510333333333335,
+      "end_time": 53.657000000000004
+    }
+  ]
+}

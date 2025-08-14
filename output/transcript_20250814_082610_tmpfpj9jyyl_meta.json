@@ -1,0 +1,19 @@
+{
+  "timestamp": "20250814_082610",
+  "original_audio": "C:\\Users\\ksj\\AppData\\Local\\Temp\\tmpfpj9jyyl.mp3",
+  "audio_improvement": {
+    "noise_reduction": 21.691244095564432,
+    "clarity": -20.44499440595796,
+    "overall": 21.068119250761196
+  },
+  "stt_stats": {
+    "total_chunks": 7,
+    "success_chunks": 7,
+    "failed_chunks": 0,
+    "retry_count": 0,
+    "total_duration": 0,
+    "success_rate": 1.0,
+    "processing_time": 25.022337198257446
+  },
+  "processing_time": 30.439131498336792
+}
